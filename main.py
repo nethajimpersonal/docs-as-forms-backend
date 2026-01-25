@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from app.routers.form_router import router
 from app.exceptions import FormException
+from app.middleware.auth_middleware import AuthMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
@@ -22,6 +23,9 @@ app = FastAPI(
 
 # Include routers
 app.include_router(router, prefix="/api")
+
+# Auth Middleware - Add before CORS
+app.add_middleware(AuthMiddleware)
 
 # CORS Middleware
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")

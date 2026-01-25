@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Compiled docs
+*.pdf
+*.docx
+templates/
+
+# Database and generated files
+db/
+generated/
+
+# Test scripts
+*.bak
+*.swp
+*.tmp
+
+# Ignore secrets
+.env
+.env.*
+
+# Ignore output
+output/

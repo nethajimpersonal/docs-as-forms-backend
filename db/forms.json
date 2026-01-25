@@ -1,17 +1,39 @@
 [
     {
-        "id": "b208cac3-2352-4c44-9eaa-906bb0d1d334",
-        "template_id": "e6b4d044-70b6-42e2-91ee-e6544fe13862",
+        "id": "6aaab208-4843-4dee-b766-04b28b0f0463",
+        "template_id": "f688ea52-009b-4c5f-bbe2-70826a8b8a55",
         "fields": {
-            "title": "sdffdgdfgfdg",
-            "description": "dgfdfg",
-            "sections": "[{\"name\":\"dfgdfgdfg\",\"fields\":[{\"name\":\"fgdfg\",\"datatype\":\"string\",\"key\":\"name\"}]}]"
+            "title": "Legal Report",
+            "description": "Legal Report form ",
+            "sections": "[{\"name\":\"Personal Info\",\"fields\":[{\"name\":\"Name\",\"datatype\":\"string\",\"key\":\"name\"}]}]"
         },
-        "template_path": "templates\\e6b4d044-70b6-42e2-91ee-e6544fe13862.docx",
+        "template_path": "templates\\f688ea52-009b-4c5f-bbe2-70826a8b8a55.docx",
         "validation": {
             "total_field_keys": 1,
             "matched_keys": [
                 "name"
+            ]
+        }
+    },
+    {
+        "id": "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "template_id": "bigform-2026-01-25",
+        "fields": {
+            "title": "Comprehensive Legal Case Form",
+            "description": "A large form for detailed legal case data entry.",
+            "sections": "[{\"name\":\"Personal Info\",\"fields\":[{\"name\":\"First Name\",\"datatype\":\"string\",\"key\":\"first_name\"},{\"name\":\"Last Name\",\"datatype\":\"string\",\"key\":\"last_name\"},{\"name\":\"Date of Birth\",\"datatype\":\"date\",\"key\":\"dob\"},{\"name\":\"Gender\",\"datatype\":\"string\",\"key\":\"gender\"},{\"name\":\"Nationality\",\"datatype\":\"string\",\"key\":\"nationality\"}]},{\"name\":\"Contact Details\",\"fields\":[{\"name\":\"Email\",\"datatype\":\"string\",\"key\":\"email\"},{\"name\":\"Phone\",\"datatype\":\"string\",\"key\":\"phone\"},{\"name\":\"Address\",\"datatype\":\"string\",\"key\":\"address\"},{\"name\":\"City\",\"datatype\":\"string\",\"key\":\"city\"},{\"name\":\"Postal Code\",\"datatype\":\"string\",\"key\":\"postal_code\"}]},{\"name\":\"Case Details\",\"fields\":[{\"name\":\"Case Number\",\"datatype\":\"string\",\"key\":\"case_number\"},{\"name\":\"Case Type\",\"datatype\":\"string\",\"key\":\"case_type\"},{\"name\":\"Filing Date\",\"datatype\":\"date\",\"key\":\"filing_date\"},{\"name\":\"Court Name\",\"datatype\":\"string\",\"key\":\"court_name\"},{\"name\":\"Judge Name\",\"datatype\":\"string\",\"key\":\"judge_name\"},{\"name\":\"Plaintiff\",\"datatype\":\"string\",\"key\":\"plaintiff\"},{\"name\":\"Defendant\",\"datatype\":\"string\",\"key\":\"defendant\"}]},{\"name\":\"Case History\",\"fields\":[{\"name\":\"Previous Hearings\",\"datatype\":\"text\",\"key\":\"prev_hearings\"},{\"name\":\"Previous Orders\",\"datatype\":\"text\",\"key\":\"prev_orders\"}]},{\"name\":\"Legal Team\",\"fields\":[{\"name\":\"Lead Lawyer\",\"datatype\":\"string\",\"key\":\"lead_lawyer\"},{\"name\":\"Supporting Lawyers\",\"datatype\":\"text\",\"key\":\"supporting_lawyers\"},{\"name\":\"Paralegals\",\"datatype\":\"text\",\"key\":\"paralegals\"}]},{\"name\":\"Evidence\",\"fields\":[{\"name\":\"Evidence List\",\"datatype\":\"text\",\"key\":\"evidence_list\"},{\"name\":\"Key Exhibits\",\"datatype\":\"text\",\"key\":\"key_exhibits\"}]},{\"name\":\"Notes\",\"fields\":[{\"name\":\"General Notes\",\"datatype\":\"text\",\"key\":\"general_notes\"},{\"name\":\"Confidential Notes\",\"datatype\":\"text\",\"key\":\"confidential_notes\"}]}]"
+        },
+        "template_path": "templates\\bigform-2026-01-25.docx",
+        "validation": {
+            "total_field_keys": 27,
+            "matched_keys": [
+                "first_name", "last_name", "dob", "gender", "nationality",
+                "email", "phone", "address", "city", "postal_code",
+                "case_number", "case_type", "filing_date", "court_name", "judge_name", "plaintiff", "defendant",
+                "prev_hearings", "prev_orders",
+                "lead_lawyer", "supporting_lawyers", "paralegals",
+                "evidence_list", "key_exhibits",
+                "general_notes", "confidential_notes"
             ]
         }
     }

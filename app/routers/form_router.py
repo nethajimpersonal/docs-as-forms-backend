@@ -1,11 +1,15 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
+from fastapi.responses import FileResponse, JSONResponse
 from app.models.form import FormCreate, FormFill
 from app.utils.form_utils import (
     load_forms, save_forms, fill_template, 
     load_generated_files, get_generated_files,
     validate_sections_against_document, validate_form_fields,
     extract_placeholders_from_document
+)
+from app.utils.auth_utils import (
+    authenticate_user, create_access_token, get_password_hash, 
+    load_users, save_users, user_exists
 )
 from app.exceptions import (
     FormNotFound, FormCreationError, TemplateFillingError, 
@@ -17,7 +21,7 @@ import uuid
 import shutil
 import logging
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -31,11 +35,159 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 # File upload size limit (50MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
+
+
+# Login endpoint (expects JSON body)
+from fastapi import Body
+from pydantic import BaseModel
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@router.post("/user/login")
+async def login(payload: LoginRequest):
+    """
+    Login endpoint that returns a JWT token.
+    Expects JSON body: {"username": ..., "password": ...}
+    """
+    username = payload.username
+    password = payload.password
+    logger.info(f"Login attempt for user: {username}")
+    user = authenticate_user(username, password)
+    if not user:
+        logger.warning(f"Failed login attempt for user: {username}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+    # Create access token with 30 minute expiration
+    access_token_expires = timedelta(minutes=30)
+    access_token = create_access_token(
+        data={"sub": user["username"], "user_id": user["id"]},
+        expires_delta=access_token_expires
+    )
+    logger.info(f"Successful login for user: {username}")
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "full_name": user["full_name"]
+        }
+    }
+
+
+@router.post("/user/register")
+async def register(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    full_name: str = Form(...)
+):
+    """
+    Register a new user.
+    
+    Args:
+        username: User's username (must be unique)
+        email: User's email (must be unique)
+        password: User's password
+        full_name: User's full name
+    
+    Returns:
+        User object with success message
+    """
+    logger.info(f"Registration attempt for user: {username}, email: {email}")
+    
+    # Validate input
+    if not username or not email or not password or not full_name:
+        logger.warning(f"Registration failed: Missing required fields")
+        raise HTTPException(
+            status_code=400,
+            detail="All fields (username, email, password, full_name) are required"
+        )
+    
+    # Validate username format (alphanumeric and underscore only)
+    if not username.replace("_", "").isalnum():
+        logger.warning(f"Registration failed: Invalid username format: {username}")
+        raise HTTPException(
+            status_code=400,
+            detail="Username must contain only alphanumeric characters and underscores"
+        )
+    
+    # Validate email format (basic check)
+    if "@" not in email or "." not in email:
+        logger.warning(f"Registration failed: Invalid email format: {email}")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid email format"
+        )
+    
+    # Validate password length
+    if len(password) < 6:
+        logger.warning(f"Registration failed: Password too short for user: {username}")
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters long"
+        )
+    
+    # Check if user already exists
+    if user_exists(username, email):
+        logger.warning(f"Registration failed: User already exists - username: {username}, email: {email}")
+        raise HTTPException(
+            status_code=409,
+            detail="Username or email already exists"
+        )
+    
+    try:
+        # Load current users
+        users = load_users()
+        
+        # Create new user
+        new_user = {
+            "id": str(uuid.uuid4()),
+            "username": username,
+            "email": email,
+            "password": get_password_hash(password),
+            "full_name": full_name,
+            "disabled": False
+        }
+        
+        # Add to users list
+        users.append(new_user)
+        
+        # Save users
+        save_users(users)
+        
+        logger.info(f"User registered successfully: {username}")
+        
+        return {
+            "message": "User registered successfully",
+            "user": {
+                "id": new_user["id"],
+                "username": new_user["username"],
+                "email": new_user["email"],
+                "full_name": new_user["full_name"]
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during registration: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred during registration"
+        )
+
+
+# Validate uploaded file
 def validate_file_upload(file: UploadFile) -> None:
     """Validate uploaded file."""
     if not file.filename:
         raise InvalidFieldsError("No filename provided")
-    
     if not file.filename.endswith('.docx'):
         raise InvalidFieldsError("Only .docx files are supported")
 
