@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 EXCLUDED_ROUTES = [
     "/api/user/register",
     "/api/user/login",
-    "/health",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
+    "/api/health",
+    "/api/docs",
+    "/api/redoc",
+    "/api/openapi.json",
 ]
 
 

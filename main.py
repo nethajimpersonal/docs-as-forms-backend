@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Legal Report Form Backend",
     description="API for creating and filling legal report form templates",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
 )
 
 # Include routers
@@ -69,7 +72,7 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={"detail": "An internal server error occurred. Please try again later."}
     )
 
-@app.get("/health")
+@app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
     logger.info("Health check performed")
