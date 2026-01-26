@@ -530,26 +530,28 @@ async def download_generated_file_by_id(file_id: str):
         raise HTTPException(status_code=500, detail="An unexpected error occurred while downloading the file")
 
 @router.get("/templates/{template_id}")
-async def view_template(template_id: str):
-    """View form template by template_id."""
+async def download_template(template_id: str):
+    """Download form template by template_id."""
     try:
-        logger.info(f"Viewing template: {template_id}")
+        logger.info(f"Downloading template: {template_id}")
         
-        template_filename = f"{template_id}"
+        # Always serve the stored .docx file and force download
+        template_filename = f"{template_id}.docx"
         template_path = os.path.join(TEMPLATES_DIR, template_filename)
         
         if not os.path.exists(template_path):
             logger.warning(f"Template file not found: {template_path}")
             raise HTTPException(status_code=404, detail=f"Template with ID '{template_id}' not found")
         
-        logger.info(f"Template view initiated: {template_id}")
+        logger.info(f"Template download initiated: {template_id}")
         return FileResponse(
             template_path, 
-            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            filename=template_filename
         )
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error viewing template {template_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while viewing the template")
+        logger.error(f"Unexpected error downloading template {template_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while downloading the template")
