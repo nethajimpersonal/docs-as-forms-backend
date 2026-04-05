@@ -416,8 +416,6 @@ async def delete_form(form_id: str):
 async def fill_form(
     form_id: str,
     values: str = Form(...),
-    font_family: str = Form(None),
-    font_size: float = Form(None)
 ):
     """Fill form template with provided values and optional font settings."""
     try:
@@ -452,8 +450,8 @@ async def fill_form(
                 values_dict, 
                 form_id=form_id,
                 form_name=form_id,  # Use form_id as the name for filename
-                font_family=font_family,
-                font_size=font_size
+                font_family=form.get("style", {}).get("font_family"),
+                font_size=form.get("style", {}).get("font_size")
             )
             logger.info(f"Form filled successfully: {form_id}, File ID: {file_id}")
             return FileResponse(
@@ -475,6 +473,7 @@ async def fill_form(
         logger.error(f"Unexpected error filling form {form_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while filling the form")
 
+@router.get("/forms/{form_id}/generated-files")
 async def list_generated_files(form_id: str):
     """List all generated files for a form."""
     try:
