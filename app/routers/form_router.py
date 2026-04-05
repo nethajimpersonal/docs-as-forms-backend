@@ -15,6 +15,7 @@ from app.exceptions import (
     FormNotFound, FormCreationError, TemplateFillingError, 
     InvalidFieldsError, FileOperationError, StorageError
 )
+from app.constants.font_constants import FontFamily
 import json
 import os
 import uuid
@@ -34,6 +35,17 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 # File upload size limit (50MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
+
+
+@router.get("/fonts/families")
+async def get_font_families():
+    """Return supported font families for UI dropdowns."""
+    logger.info("Fetching supported font families")
+    font_families = [font.value for font in FontFamily]
+    return {
+        "font_families": font_families,
+        "total": len(font_families)
+    }
 
 
 
@@ -284,11 +296,15 @@ async def create_form(fields: str = Form(...), file: UploadFile = File(...)):
                 pass
             raise HTTPException(status_code=500, detail="Failed to save template file")
         
+        styles = fields_dict.get("style", {})
+        
         form = {
             "id": form_id,
             "template_id": template_id,
             "fields": fields_dict,
             "template_path": template_path,
+            "created_at": datetime.now().isoformat(),
+            "style": styles,
             "validation": {
                 "total_field_keys": validation_result["total_field_keys"],
                 "matched_keys": validation_result["matched_keys"]
@@ -397,8 +413,13 @@ async def delete_form(form_id: str):
         raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the form")
 
 @router.post("/forms/{form_id}/fill")
-async def fill_form(form_id: str, values: str = Form(...)):
-    """Fill form template with provided values."""
+async def fill_form(
+    form_id: str,
+    values: str = Form(...),
+    font_family: str = Form(None),
+    font_size: float = Form(None)
+):
+    """Fill form template with provided values and optional font settings."""
     try:
         logger.info(f"Filling form: {form_id}")
         
@@ -425,13 +446,14 @@ async def fill_form(form_id: str, values: str = Form(...)):
             logger.warning(f"Form not found: {form_id}")
             raise HTTPException(status_code=404, detail=f"Form with ID '{form_id}' not found")
         
-        # Fill template
         try:
             filled_path, file_id = fill_template(
                 form["template_path"], 
                 values_dict, 
                 form_id=form_id,
-                form_name=form_id  # Use form_id as the name for filename
+                form_name=form_id,  # Use form_id as the name for filename
+                font_family=font_family,
+                font_size=font_size
             )
             logger.info(f"Form filled successfully: {form_id}, File ID: {file_id}")
             return FileResponse(

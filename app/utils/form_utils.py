@@ -5,7 +5,8 @@ import uuid
 import re
 from datetime import datetime
 from docx import Document
-from typing import Dict, List, Tuple, Set
+from docx.shared import Pt
+from typing import Any, Dict, List, Tuple, Set
 from app.exceptions import StorageError, TemplateFillingError, FileOperationError, InvalidFieldsError
 
 # File to store forms
@@ -320,7 +321,89 @@ def get_generated_files(form_id: str) -> List[Dict]:
         logger.error(f"Error retrieving generated files for form {form_id}: {str(e)}")
         raise StorageError(f"Failed to retrieve generated files: {str(e)}")
 
-def fill_template(template_path: str, values: Dict[str, str], form_id: str = None, form_name: str = None) -> Tuple[str, str]:
+def _apply_run_style(run, style: Dict[str, Any]) -> None:
+    """Apply supported style attributes to a DOCX run."""
+
+    # Set font family (accepts either font_name or font_family key).
+    font_name = style.get("font_name") or style.get("font_family")
+    if font_name:
+        run.font.name = str(font_name)
+
+    # Set font size in points.
+    font_size = style.get("font_size", style.get("size"))
+    if font_size is not None:
+        try:
+            run.font.size = Pt(float(font_size))
+        except (TypeError, ValueError):
+            # Keep document generation running even if size input is invalid.
+            logger.warning(f"Invalid font size provided: {font_size}")
+
+def _replace_placeholders_in_paragraph(paragraph, values: Dict[str, Any], default_style: Dict[str, Any] = None) -> None:
+    """Replace placeholders in one paragraph and apply optional run styles."""
+    # Use empty style when no defaults are passed.
+    default_style = default_style or {}
+    # Read full paragraph text (combined from all runs).
+    original_text = paragraph.text
+    if not original_text:
+        return
+
+    # Match placeholders like {{field_name}}.
+    pattern = r"\{\{([a-zA-Z0-9_]+)\}\}"
+    matches = list(re.finditer(pattern, original_text))
+    # Nothing to replace in this paragraph.
+    if not matches:
+        return
+
+    # segments stores final paragraph parts as (text, style).
+    segments: List[Tuple[str, Dict[str, Any]]] = []
+    last_pos = 0
+    has_replacement = False
+
+    for match in matches:
+        # Extract key inside braces, e.g., {{name}} -> name.
+        key = match.group(1)
+        # Skip placeholders that are not present in values.
+        if key not in values:
+            continue
+
+        # Keep normal text before the placeholder unchanged.
+        if match.start() > last_pos:
+            segments.append((original_text[last_pos:match.start()], {}))
+
+        # Replace placeholder with provided value and apply default style.
+        replacement_text = str(values[key])
+        segments.append((replacement_text, dict(default_style)))
+        last_pos = match.end()
+        has_replacement = True
+
+    # If no known keys were found, keep paragraph as-is.
+    if not has_replacement:
+        return
+
+    # Keep remaining text after the last placeholder.
+    if last_pos < len(original_text):
+        segments.append((original_text[last_pos:], {}))
+
+    # Remove old runs so we can rebuild paragraph content cleanly.
+    for run in list(paragraph.runs):
+        paragraph._element.remove(run._element)
+
+    # Add new runs back in order and apply style only to replacement parts.
+    for text, style in segments:
+        if text == "":
+            continue
+        new_run = paragraph.add_run(text)
+        if style:
+            _apply_run_style(new_run, style)
+
+def fill_template(
+    template_path: str,
+    values: Dict[str, Any],
+    form_id: str = None,
+    form_name: str = None,
+    font_family: str = None,
+    font_size: float = None
+) -> Tuple[str, str]:
     """
     Fill template with values, replacing placeholders in document.
     
@@ -329,6 +412,8 @@ def fill_template(template_path: str, values: Dict[str, str], form_id: str = Non
         values: Dictionary of values to fill
         form_id: Form ID for tracking generated files
         form_name: Form name for the generated filename
+        font_family: Optional font family applied to all inserted values
+        font_size: Optional font size (in points) applied to all inserted values
     
     Returns:
         Tuple of (filled_file_path, file_id) where file_id is used for tracking
@@ -339,33 +424,29 @@ def fill_template(template_path: str, values: Dict[str, str], form_id: str = Non
             raise FileOperationError(f"Template file not found: {template_path}")
         
         doc = Document(template_path)
+        default_style = {}
+        if font_family:
+            default_style["font_family"] = font_family
+        if font_size is not None:
+            default_style["font_size"] = font_size
         
         # Replace in paragraphs
         for paragraph in doc.paragraphs:
-            for key, value in values.items():
-                placeholder = f"{{{{{key}}}}}"
-                if placeholder in paragraph.text:
-                    paragraph.text = paragraph.text.replace(placeholder, str(value))
+            _replace_placeholders_in_paragraph(paragraph, values, default_style)
         
         # Replace in tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for key, value in values.items():
-                        placeholder = f"{{{{{key}}}}}"
-                        if placeholder in cell.text:
-                            cell.text = cell.text.replace(placeholder, str(value))
+                    for paragraph in cell.paragraphs:
+                        _replace_placeholders_in_paragraph(paragraph, values, default_style)
         
         # Replace in headers and footers
         for section in doc.sections:
-            for key, value in values.items():
-                placeholder = f"{{{{{key}}}}}"
-                for paragraph in section.header.paragraphs:
-                    if placeholder in paragraph.text:
-                        paragraph.text = paragraph.text.replace(placeholder, str(value))
-                for paragraph in section.footer.paragraphs:
-                    if placeholder in paragraph.text:
-                        paragraph.text = paragraph.text.replace(placeholder, str(value))
+            for paragraph in section.header.paragraphs:
+                _replace_placeholders_in_paragraph(paragraph, values, default_style)
+            for paragraph in section.footer.paragraphs:
+                _replace_placeholders_in_paragraph(paragraph, values, default_style)
         
         # Generate filename with form name and timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
