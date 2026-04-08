@@ -1,11 +1,15 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Query
 from fastapi.responses import FileResponse, JSONResponse
 from app.models.form import FormCreate, FormFill
 from app.utils.form_utils import (
     load_forms, save_forms, fill_template, 
-    load_generated_files, get_generated_files,
+    load_form_submissions, get_form_submissions,
     validate_sections_against_document, validate_form_fields,
-    extract_placeholders_from_document
+    extract_placeholders_from_document,
+    add_saved_form_submission,
+    load_saved_form_submissions,
+    save_saved_form_submissions,
+    delete_saved_form_submission
 )
 from app.utils.auth_utils import (
     authenticate_user, create_access_token, get_password_hash, 
@@ -23,6 +27,7 @@ import shutil
 import logging
 import tempfile
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 router = APIRouter()
 
@@ -35,6 +40,14 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 # File upload size limit (50MB)
 MAX_FILE_SIZE = 50 * 1024 * 1024
+
+
+def build_docx_download_headers(filename: str) -> dict:
+    quoted_filename = quote(filename)
+    return {
+        "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quoted_filename}",
+        "X-Content-Type-Options": "nosniff",
+    }
 
 
 @router.get("/fonts/families")
@@ -412,7 +425,7 @@ async def delete_form(form_id: str):
         logger.error(f"Unexpected error deleting form {form_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting the form")
 
-@router.post("/forms/{form_id}/fill")
+@router.post("/forms/{form_id}/submit")
 async def fill_form(
     form_id: str,
     values: str = Form(...),
@@ -445,7 +458,7 @@ async def fill_form(
             raise HTTPException(status_code=404, detail=f"Form with ID '{form_id}' not found")
         
         try:
-            filled_path, file_id = fill_template(
+            filled_path, submission_id = fill_template(
                 form["template_path"], 
                 values_dict, 
                 form_id=form_id,
@@ -453,12 +466,12 @@ async def fill_form(
                 font_family=form.get("style", {}).get("font_family"),
                 font_size=form.get("style", {}).get("font_size")
             )
-            logger.info(f"Form filled successfully: {form_id}, File ID: {file_id}")
+            logger.info(f"Form filled successfully: {form_id}, Submission ID: {submission_id}")
             return FileResponse(
                 filled_path, 
                 media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 filename=os.path.basename(filled_path),
-                headers={"X-File-ID": file_id}  # Return file ID in response header
+                headers={"X-Submission-ID": submission_id}  # Return submission ID in response header
             )
         except TemplateFillingError as e:
             logger.error(f"Template filling error for form {form_id}: {str(e)}")
@@ -473,11 +486,11 @@ async def fill_form(
         logger.error(f"Unexpected error filling form {form_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while filling the form")
 
-@router.get("/forms/{form_id}/generated-files")
-async def list_generated_files(form_id: str):
-    """List all generated files for a form."""
+@router.get("/forms/{form_id}/form-submissions")
+async def list_form_submissions(form_id: str):
+    """List all form submissions for a form."""
     try:
-        logger.info(f"Listing generated files for form: {form_id}")
+        logger.info(f"Listing form submissions for form: {form_id}")
         
         # Verify form exists
         try:
@@ -491,48 +504,278 @@ async def list_generated_files(form_id: str):
             logger.warning(f"Form not found: {form_id}")
             raise HTTPException(status_code=404, detail=f"Form with ID '{form_id}' not found")
         
-        # Get generated files
-        generated_files = get_generated_files(form_id)
-        logger.info(f"Retrieved {len(generated_files)} generated files for form {form_id}")
+        # Get form submissions
+        form_submissions = get_form_submissions(form_id)
+        logger.info(f"Retrieved {len(form_submissions)} form submissions for form {form_id}")
         
         return {
             "form_id": form_id,
-            "total_generated": len(generated_files),
-            "files": generated_files
+            "total_form_submissions": len(form_submissions),
+            "form_submissions": form_submissions
         }
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error listing generated files for {form_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while listing generated files")
+        logger.error(f"Unexpected error listing form submissions for {form_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while listing form submissions")
 
-@router.get("/generated/{file_id}")
-async def download_generated_file_by_id(file_id: str):
-    """Download a generated file directly by file_id."""
+
+@router.get("/submitted/{form_id}/{submission_id}/save")
+async def save_form_submission(form_id: str, submission_id: str, reference_text: str):
+    """Save values_used for a generated submission by form_id and submission_id."""
     try:
-        logger.info(f"Downloading generated file: {file_id}")
-        
-        # Load all generated files and search across all forms
+        logger.info(f"Saving form submission for form: {form_id}, submission: {submission_id}")
+
+        # Verify form exists
         try:
-            from app.utils.form_utils import load_generated_files
-            all_generated_files = load_generated_files()
+            forms = load_forms()
         except StorageError as e:
-            logger.error(f"Storage error while loading generated files: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to retrieve generated files")
+            logger.error(f"Storage error while loading forms: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve forms")
+
+        form = next((f for f in forms if f["id"] == form_id), None)
+        if not form:
+            logger.warning(f"Form not found while saving submission: {form_id}")
+            raise HTTPException(status_code=404, detail=f"Form with ID '{form_id}' not found")
+
+        # Verify form submission file belongs to form
+        try:
+            form_submissions = load_form_submissions()
+        except StorageError as e:
+            logger.error(f"Storage error while loading form submissions: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve form submissions")
+
+        form_submissions_for_form = form_submissions.get(form_id, [])
+        submission_record = next((f for f in form_submissions_for_form if f.get("submission_id") == submission_id), None)
+        if not submission_record:
+            logger.warning(f"Submission not found for form while saving submission: form={form_id}, submission={submission_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Submission with ID '{submission_id}' not found for form '{form_id}'"
+            )
+
+        saved_submission_id = add_saved_form_submission(
+            form_id=form_id,
+            submission_id=submission_id,
+            values_used=submission_record.get("values_used", {}),
+            reference_text=reference_text
+        )
+
+        logger.info(f"Saved form submission: {saved_submission_id}")
+        return {
+            "message": "Form submission saved successfully",
+            "form_id": form_id,
+            "submission_id": submission_id,
+            "reference_text": reference_text,
+            "saved_submission_id": saved_submission_id,
+            "saved_values": submission_record.get("values_used", {})
+        }
+
+    except HTTPException:
+        raise
+    except StorageError as e:
+        logger.error(f"Storage error while saving form submission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save form submission")
+    except Exception as e:
+        logger.error(f"Unexpected error while saving form submission: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while saving form submission")
+
+
+@router.get("/saved/{form_id}")
+async def get_saved_submissions_by_form_id(form_id: str, search_text: str = ""):
+    """Fetch saved submissions for a given form_id, optionally filtered by reference_text."""
+    try:
+        logger.info(f"Fetching saved submissions for form: {form_id}")
+
+        try:
+            saved_form_submissions = load_saved_form_submissions()
+        except StorageError as e:
+            logger.error(f"Storage error while loading saved form submissions: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve saved form submissions")
+
+        matches = saved_form_submissions.get(form_id, [])
+
+        # Filter by reference_text when search_text is provided.
+        if search_text:
+            search_term = search_text.lower()
+            matches = [
+                submission
+                for submission in matches
+                if search_term in str(submission.get("reference_text", "")).lower()
+            ]
+
+        return {
+            "form_id": form_id,
+            "search_text": search_text,
+            "total_saved_submissions": len(matches),
+            "saved_submissions": matches,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error while fetching saved submissions for form {form_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching saved submissions")
+
+
+@router.get("/saved/{submission_id}/re-generate")
+async def regenerate_saved_submission(submission_id: str, form_id: str = Query(...)):
+    """Regenerate a saved submission DOCX and cache it under the saved folder."""
+    try:
+        logger.info(f"Regenerating saved submission: form={form_id}, submission={submission_id}")
+
+        # Verify form exists
+        try:
+            forms = load_forms()
+        except StorageError as e:
+            logger.error(f"Storage error while loading forms: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve forms")
+
+        form = next((f for f in forms if f["id"] == form_id), None)
+        if not form:
+            raise HTTPException(status_code=404, detail=f"Form with ID '{form_id}' not found")
+
+        # Find saved submission entry for this form and submission
+        try:
+            saved_form_submissions = load_saved_form_submissions()
+        except StorageError as e:
+            logger.error(f"Storage error while loading saved form submissions: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve saved form submissions")
+
+        form_saved_entries = saved_form_submissions.get(form_id, [])
+        saved_entry = next((s for s in form_saved_entries if s.get("submission_id") == submission_id), None)
+        if not saved_entry:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Saved submission with ID '{submission_id}' not found for form '{form_id}'"
+            )
+
+        # If already regenerated and file still exists, return cached file.
+        cached_file_path = saved_entry.get("regenerated_file_path")
+        if cached_file_path and not os.path.isabs(cached_file_path):
+            cached_file_path = os.path.abspath(cached_file_path)
+
+        if saved_entry.get("is_regenerated") and cached_file_path and os.path.exists(cached_file_path):
+            cached_filename = os.path.basename(cached_file_path)
+            return FileResponse(
+                cached_file_path,
+                media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                filename=cached_filename,
+                headers=build_docx_download_headers(cached_filename)
+            )
+
+        values_used = saved_entry.get("values_used", {})
+        if not isinstance(values_used, dict):
+            raise HTTPException(status_code=400, detail="Saved submission values are invalid")
+
+        reference_text = str(saved_entry.get("reference_text", "saved")).strip() or "saved"
+        safe_reference_text = "".join(
+            character if character.isalnum() or character in (" ", "-", "_") else "_"
+            for character in reference_text
+        ).strip()
+        safe_reference_text = safe_reference_text or "saved"
+
+        # Generate DOCX from saved values without re-registering in form_submissions.
+        generated_path, _ = fill_template(
+            form["template_path"],
+            values_used,
+            form_id=None,
+            form_name=safe_reference_text,
+            font_family=form.get("style", {}).get("font_family"),
+            font_size=form.get("style", {}).get("font_size")
+        )
+
+        saved_dir = os.path.abspath("saved")
+        os.makedirs(saved_dir, exist_ok=True)
+        saved_filename = f"{safe_reference_text}.docx"
+        saved_file_path = os.path.join(saved_dir, saved_filename)
+
+        # Move generated file into saved cache location.
+        if os.path.exists(saved_file_path):
+            os.remove(saved_file_path)
+        shutil.move(generated_path, saved_file_path)
+
+        # Persist regeneration state to avoid regenerating next time.
+        saved_entry["is_regenerated"] = True
+        saved_entry["regenerated_file_path"] = saved_file_path
+        saved_entry["regenerated_at"] = datetime.now().isoformat()
+        save_saved_form_submissions(saved_form_submissions)
+
+        return FileResponse(
+            saved_file_path,
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            filename=saved_filename,
+            headers=build_docx_download_headers(saved_filename)
+        )
+
+    except HTTPException:
+        raise
+    except StorageError as e:
+        logger.error(f"Storage error while regenerating saved submission: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to regenerate saved submission")
+    except Exception as e:
+        logger.error(f"Unexpected error while regenerating saved submission: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while regenerating saved submission")
+
+
+@router.delete("/saved/{form_id}/{submission_id}")
+async def delete_saved_submission(form_id: str, submission_id: str):
+    """Delete a saved submission object by form_id and submission_id."""
+    try:
+        logger.info(f"Deleting saved submission for form: {form_id}, submission: {submission_id}")
+
+        try:
+            deleted_count = delete_saved_form_submission(form_id=form_id, submission_id=submission_id)
+        except StorageError as e:
+            logger.error(f"Storage error while deleting saved submission: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to delete saved submission")
+
+        if deleted_count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Saved submission not found for form '{form_id}' and submission '{submission_id}'"
+            )
+
+        return {
+            "message": "Saved submission deleted successfully",
+            "form_id": form_id,
+            "submission_id": submission_id,
+            "deleted_count": deleted_count
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error while deleting saved submission for form {form_id}, submission {submission_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting saved submission")
+
+@router.get("/submitted/{submission_id}")
+async def download_generated_file_by_id(submission_id: str):
+    """Download a generated file directly by submission_id."""
+    try:
+        logger.info(f"Downloading generated file: {submission_id}")
+        
+        # Load all form submissions and search across all forms
+        try:
+            from app.utils.form_utils import load_form_submissions
+            all_form_submissions = load_form_submissions()
+        except StorageError as e:
+            logger.error(f"Storage error while loading form submissions: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to retrieve form submissions")
         
         # Find the file across all forms
-        file_record = None
-        for form_id, files in all_generated_files.items():
-            file_record = next((f for f in files if f["file_id"] == file_id), None)
-            if file_record:
+        submission_record = None
+        for form_id, files in all_form_submissions.items():
+            submission_record = next((f for f in files if f["submission_id"] == submission_id), None)
+            if submission_record:
                 break
         
-        if not file_record:
-            logger.warning(f"Generated file not found: {file_id}")
-            raise HTTPException(status_code=404, detail=f"Generated file with ID '{file_id}' not found")
+        if not submission_record:
+            logger.warning(f"Generated file not found: {submission_id}")
+            raise HTTPException(status_code=404, detail=f"Generated file with ID '{submission_id}' not found")
         
-        file_path = file_record["file_path"]
+        file_path = submission_record["file_path"]
         if not os.path.exists(file_path):
             logger.error(f"Generated file path does not exist: {file_path}")
             raise HTTPException(status_code=500, detail="Generated file not found on server")
@@ -541,13 +784,13 @@ async def download_generated_file_by_id(file_id: str):
         return FileResponse(
             file_path, 
             media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            filename=file_record["filename"]
+            filename=submission_record["filename"]
         )
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error downloading generated file {file_id}: {str(e)}")
+        logger.error(f"Unexpected error downloading generated file {submission_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while downloading the file")
 
 @router.get("/templates/{template_id}")

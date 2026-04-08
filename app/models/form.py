@@ -6,3 +6,8 @@ class FormCreate(BaseModel):
 
 class FormFill(BaseModel):
     values: Dict[str, str]  # e.g., {"name": "John", "email": "john@example.com"}
+
+
+class SaveFormSubmissionRequest(BaseModel):
+    form_id: str
+    submission_id: str

@@ -1,14 +1,14 @@
 # Generated Files Storage System
 
 ## Overview
-The system now stores filled templates in a dedicated `generated` folder and tracks all generated files using a separate `generated_files.json` database file.
+The system now stores filled templates in a dedicated `generated` folder and tracks all form submissions using a separate `form_submissions.json` database file.
 
 ## File Structure
 
 ```
 project_root/
 ├── forms.json                    # Form definitions (unchanged)
-├── generated_files.json          # Generated file references & tracking
+├── form_submissions.json         # Form submission references & tracking
 ├── generated/                    # Folder for all filled documents
 │   ├── sample-form_20260124_143022.docx
 │   ├── sample-form_20260124_150512.docx
@@ -21,13 +21,13 @@ project_root/
 
 ## Generated Files Database Structure
 
-### `generated_files.json`
+### `form_submissions.json`
 
 ```json
 {
   "form-id-1": [
     {
-      "file_id": "uuid-1",
+      "submission_id": "uuid-1",
       "file_path": "generated/sample-form_20260124_143022.docx",
       "filename": "sample-form_20260124_143022.docx",
       "created_at": "2026-01-24T14:30:22",
@@ -38,7 +38,7 @@ project_root/
       }
     },
     {
-      "file_id": "uuid-2",
+      "submission_id": "uuid-2",
       "file_path": "generated/sample-form_20260124_150512.docx",
       "filename": "sample-form_20260124_150512.docx",
       "created_at": "2026-01-24T15:05:12",
@@ -51,7 +51,7 @@ project_root/
   ],
   "form-id-2": [
     {
-      "file_id": "uuid-3",
+      "submission_id": "uuid-3",
       ...
     }
   ]
@@ -68,7 +68,7 @@ project_root/
 
 ### 2. **Complete Tracking**
 Each generated file record includes:
-- `file_id` - Unique identifier for the generated file
+- `submission_id` - Unique identifier for the generated file
 - `file_path` - Relative path to the file
 - `filename` - Original filename for download
 - `created_at` - ISO timestamp of creation
@@ -101,7 +101,7 @@ GET /forms/{form_id}/generated
   "total_generated": 5,
   "files": [
     {
-      "file_id": "uuid-1",
+      "submission_id": "uuid-1",
       "file_path": "generated/...",
       "filename": "...",
       "created_at": "2026-01-24T14:30:22.123456",
@@ -114,7 +114,7 @@ GET /forms/{form_id}/generated
 
 ### 3. **Download Specific Generated File**
 ```
-GET /forms/{form_id}/generated/{file_id}
+GET /forms/{form_id}/generated/{submission_id}
 ```
 **Returns:** The DOCX file
 
@@ -167,7 +167,7 @@ const blob = await response.blob();
 ✅ **Retrievable** - Download any previously generated file by ID  
 ✅ **Organized** - Clear folder structure and database  
 ✅ **Timestamped** - Automatic creation timestamps for all files  
-✅ **Unique IDs** - Every generated file has unique file_id for reference  
+✅ **Unique IDs** - Every generated file has unique submission_id for reference  
 
 ## Database Functions
 
@@ -175,14 +175,14 @@ Available in `app/utils/form_utils.py`:
 
 ```python
 # Load the generated files database
-generated_files = load_generated_files()
+form_submissions = load_form_submissions()
 
 # Save updated database
-save_generated_files(generated_files)
+save_form_submissions(form_submissions)
 
 # Get all generated files for a form
-files = get_generated_files(form_id)
+files = get_form_submissions(form_id)
 
 # Register a new generated file (called automatically by fill_template)
-file_id = add_generated_file(form_id, file_path, values)
+submission_id = add_form_submission_file(form_id, file_path, values)
 ```

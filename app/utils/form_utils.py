@@ -12,7 +12,8 @@ from app.exceptions import StorageError, TemplateFillingError, FileOperationErro
 # File to store forms
 DB_DIR = "db"
 FORMS_FILE = os.path.join(DB_DIR, "forms.json")
-GENERATED_FILES_DB = os.path.join(DB_DIR, "generated_files.json")
+FORM_SUBMISSIONS_DB = os.path.join(DB_DIR, "form_submissions.json")
+SAVED_FORM_SUBMISSIONS_DB = os.path.join(DB_DIR, "saved_form_submissions.json")
 GENERATED_DIR = "generated"
 
 # Configure logging
@@ -55,42 +56,137 @@ def save_forms(forms):
         logger.error(f"Unexpected error while saving forms: {str(e)}")
         raise StorageError(f"Unexpected error saving forms: {str(e)}")
 
-def load_generated_files():
-    """Load generated files database with error handling."""
+def load_form_submissions():
+    """Load form submissions database with error handling."""
     try:
-        if os.path.exists(GENERATED_FILES_DB):
-            with open(GENERATED_FILES_DB, "r") as f:
+        if os.path.exists(FORM_SUBMISSIONS_DB):
+            with open(FORM_SUBMISSIONS_DB, "r") as f:
                 data = json.load(f)
                 return data
         return {}
     except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error while reading {GENERATED_FILES_DB}: {str(e)}")
-        raise StorageError(f"Corrupted generated files database: {str(e)}")
+        logger.error(f"JSON decode error while reading {FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Corrupted form submissions database: {str(e)}")
     except IOError as e:
-        logger.error(f"IO error while reading {GENERATED_FILES_DB}: {str(e)}")
-        raise StorageError(f"Cannot read generated files database: {str(e)}")
+        logger.error(f"IO error while reading {FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Cannot read form submissions database: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error while loading generated files: {str(e)}")
-        raise StorageError(f"Unexpected error loading generated files: {str(e)}")
+        logger.error(f"Unexpected error while loading form submissions: {str(e)}")
+        raise StorageError(f"Unexpected error loading form submissions: {str(e)}")
 
-def save_generated_files(generated_files: Dict):
-    """Save generated files database with error handling."""
+def save_form_submissions(form_submissions: Dict):
+    """Save form submissions database with error handling."""
     try:
-        with open(GENERATED_FILES_DB, "w") as f:
-            json.dump(generated_files, f, indent=4)
+        with open(FORM_SUBMISSIONS_DB, "w") as f:
+            json.dump(form_submissions, f, indent=4)
     except IOError as e:
-        logger.error(f"IO error while writing to {GENERATED_FILES_DB}: {str(e)}")
-        raise StorageError(f"Cannot save generated files database: {str(e)}")
+        logger.error(f"IO error while writing to {FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Cannot save form submissions database: {str(e)}")
     except TypeError as e:
-        logger.error(f"Type error while serializing generated files: {str(e)}")
-        raise StorageError(f"Generated files contain non-serializable data: {str(e)}")
+        logger.error(f"Type error while serializing form submissions: {str(e)}")
+        raise StorageError(f"Form submissions contain non-serializable data: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error while saving generated files: {str(e)}")
-        raise StorageError(f"Unexpected error saving generated files: {str(e)}")
+        logger.error(f"Unexpected error while saving form submissions: {str(e)}")
+        raise StorageError(f"Unexpected error saving form submissions: {str(e)}")
 
-def add_generated_file(form_id: str, file_path: str, values: Dict[str, str]) -> str:
+
+def load_saved_form_submissions() -> Dict:
+    """Load saved form submissions database with error handling."""
+    try:
+        if os.path.exists(SAVED_FORM_SUBMISSIONS_DB):
+            with open(SAVED_FORM_SUBMISSIONS_DB, "r") as f:
+                return json.load(f)
+        return {}
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error while reading {SAVED_FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Corrupted saved form submissions database: {str(e)}")
+    except IOError as e:
+        logger.error(f"IO error while reading {SAVED_FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Cannot read saved form submissions database: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error while loading saved form submissions: {str(e)}")
+        raise StorageError(f"Unexpected error loading saved form submissions: {str(e)}")
+
+
+def save_saved_form_submissions(saved_submissions: Dict) -> None:
+    """Save saved form submissions database with error handling."""
+    try:
+        with open(SAVED_FORM_SUBMISSIONS_DB, "w") as f:
+            json.dump(saved_submissions, f, indent=4)
+    except IOError as e:
+        logger.error(f"IO error while writing to {SAVED_FORM_SUBMISSIONS_DB}: {str(e)}")
+        raise StorageError(f"Cannot save saved form submissions database: {str(e)}")
+    except TypeError as e:
+        logger.error(f"Type error while serializing saved form submissions: {str(e)}")
+        raise StorageError(f"Saved form submissions contain non-serializable data: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error while saving saved form submissions: {str(e)}")
+        raise StorageError(f"Unexpected error saving saved form submissions: {str(e)}")
+
+
+def add_saved_form_submission(
+    form_id: str,
+    submission_id: str,
+    values_used: Dict[str, Any],
+    reference_text: str
+) -> str:
+    """Store values_used for a generated file under a form and return the submission ID."""
+    try:
+        saved_submissions = load_saved_form_submissions()
+
+        if form_id not in saved_submissions:
+            saved_submissions[form_id] = []
+
+        saved_submission_id = str(uuid.uuid4())
+        submission_record = {
+            "saved_submission_id": saved_submission_id,
+            "submission_id": submission_id,
+            "reference_text": reference_text,
+            "saved_at": datetime.now().isoformat(),
+            "values_used": values_used,
+        }
+
+        saved_submissions[form_id].append(submission_record)
+        save_saved_form_submissions(saved_submissions)
+        return saved_submission_id
+    except StorageError:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding saved form submission for form {form_id}, submission {submission_id}: {str(e)}")
+        raise StorageError(f"Failed to add saved form submission: {str(e)}")
+
+
+def delete_saved_form_submission(form_id: str, submission_id: str) -> int:
+    """Delete saved submission records by form_id and submission_id and return delete count."""
+    try:
+        saved_submissions = load_saved_form_submissions()
+        form_entries = saved_submissions.get(form_id, [])
+
+        if not form_entries:
+            return 0
+
+        remaining_entries = [entry for entry in form_entries if entry.get("submission_id") != submission_id]
+        deleted_count = len(form_entries) - len(remaining_entries)
+
+        if deleted_count == 0:
+            return 0
+
+        if remaining_entries:
+            saved_submissions[form_id] = remaining_entries
+        else:
+            saved_submissions.pop(form_id, None)
+
+        save_saved_form_submissions(saved_submissions)
+        return deleted_count
+    except StorageError:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting saved form submission for form {form_id}, submission {submission_id}: {str(e)}")
+        raise StorageError(f"Failed to delete saved form submission: {str(e)}")
+
+def add_form_submission_file(form_id: str, file_path: str, values: Dict[str, str]) -> str:
     """
-    Register a generated file in the database.
+    Register a form submission file in the database.
     
     Args:
         form_id: The form ID
@@ -98,34 +194,34 @@ def add_generated_file(form_id: str, file_path: str, values: Dict[str, str]) -> 
         values: The values used to fill the form
     
     Returns:
-        The generated file ID
+        The form submission file ID
     """
     try:
-        generated_files = load_generated_files()
+        form_submissions = load_form_submissions()
         
         # Create form entry if it doesn't exist
-        if form_id not in generated_files:
-            generated_files[form_id] = []
+        if form_id not in form_submissions:
+            form_submissions[form_id] = []
         
-        # Create file record
-        file_id = str(uuid.uuid4())
-        file_record = {
-            "file_id": file_id,
+        # Create submission record
+        submission_id = str(uuid.uuid4())
+        submission_record = {
+            "submission_id": submission_id,
             "file_path": file_path,
             "filename": os.path.basename(file_path),
             "created_at": datetime.now().isoformat(),
             "values_used": values
         }
         
-        generated_files[form_id].append(file_record)
-        save_generated_files(generated_files)
-        return file_id
+        form_submissions[form_id].append(submission_record)
+        save_form_submissions(form_submissions)
+        return submission_id
     
     except StorageError:
         raise
     except Exception as e:
-        logger.error(f"Error registering generated file: {str(e)}")
-        raise StorageError(f"Failed to register generated file: {str(e)}")
+        logger.error(f"Error registering form submission file: {str(e)}")
+        raise StorageError(f"Failed to register form submission file: {str(e)}")
 def extract_placeholders_from_document(doc_path: str) -> Set[str]:
     """
     Extract all placeholder field names from a DOCX document.
@@ -309,17 +405,17 @@ def validate_form_fields(doc_path: str, form_fields: Dict[str, str]) -> Dict[str
     except Exception as e:
         logger.error(f"Error validating form fields: {str(e)}")
         raise FileOperationError(f"Failed to validate form fields: {str(e)}")
-def get_generated_files(form_id: str) -> List[Dict]:
-    """Get all generated files for a form."""
+def get_form_submissions(form_id: str) -> List[Dict]:
+    """Get all form submissions for a form."""
     try:
-        generated_files = load_generated_files()
-        files = generated_files.get(form_id, [])
+        form_submissions = load_form_submissions()
+        files = form_submissions.get(form_id, [])
         return files
     except StorageError:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving generated files for form {form_id}: {str(e)}")
-        raise StorageError(f"Failed to retrieve generated files: {str(e)}")
+        logger.error(f"Error retrieving form submissions for form {form_id}: {str(e)}")
+        raise StorageError(f"Failed to retrieve form submissions: {str(e)}")
 
 def _apply_run_style(run, style: Dict[str, Any]) -> None:
     """Apply supported style attributes to a DOCX run."""
@@ -416,7 +512,7 @@ def fill_template(
         font_size: Optional font size (in points) applied to all inserted values
     
     Returns:
-        Tuple of (filled_file_path, file_id) where file_id is used for tracking
+        Tuple of (filled_file_path, submission_id) where submission_id is used for tracking
     """
     try:
         if not os.path.exists(template_path):
@@ -463,17 +559,17 @@ def fill_template(
         doc.save(filled_path)
         
         # Register the generated file if form_id is provided
-        file_id = None
+        submission_id = None
         if form_id:
             try:
-                file_id = add_generated_file(form_id, filled_path, values)
+                submission_id = add_form_submission_file(form_id, filled_path, values)
             except StorageError as e:
                 logger.warning(f"Could not register generated file, but template was filled: {str(e)}")
-                file_id = str(uuid.uuid4())
+                submission_id = str(uuid.uuid4())
         else:
-            file_id = str(uuid.uuid4())
+            submission_id = str(uuid.uuid4())
         
-        return filled_path, file_id
+        return filled_path, submission_id
         
     except FileOperationError:
         raise
