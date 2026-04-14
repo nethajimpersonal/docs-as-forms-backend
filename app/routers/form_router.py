@@ -86,8 +86,8 @@ async def login(payload: LoginRequest):
             status_code=401,
             detail="Invalid username or password"
         )
-    # Create access token with 30 minute expiration
-    access_token_expires = timedelta(minutes=30)
+    # Create access token with 3 hour expiration
+    access_token_expires = timedelta(hours=3)
     access_token = create_access_token(
         data={"sub": user["username"], "user_id": user["id"]},
         expires_delta=access_token_expires
@@ -459,14 +459,14 @@ async def fill_form(
         
         try:
             filled_path, submission_id = fill_template(
-                form["template_path"], 
-                values_dict, 
+                form["template_path"],
+                values_dict,
                 form_id=form_id,
-                form_name=form_id,  # Use form_id as the name for filename
+                form_name=form_id,
                 font_family=form.get("style", {}).get("font_family"),
                 font_size=form.get("style", {}).get("font_size")
             )
-            logger.info(f"Form filled successfully: {form_id}, Submission ID: {submission_id}")
+            logger.info(f"Form filled successfully: {form_id}, Submission ID: {submission_id}, Filled file path: {filled_path}")
             return FileResponse(
                 filled_path, 
                 media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -619,11 +619,11 @@ async def get_saved_submissions_by_form_id(form_id: str, search_text: str = ""):
         raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching saved submissions")
 
 
-@router.get("/saved/{submission_id}/re-generate")
-async def regenerate_saved_submission(submission_id: str, form_id: str = Query(...)):
+@router.get("/saved/{saved_submission_id}/re-generate")
+async def regenerate_saved_submission(saved_submission_id: str, form_id: str = Query(...)):
     """Regenerate a saved submission DOCX and cache it under the saved folder."""
     try:
-        logger.info(f"Regenerating saved submission: form={form_id}, submission={submission_id}")
+        logger.info(f"Regenerating saved submission: form={form_id}, submission={saved_submission_id}")
 
         # Verify form exists
         try:
@@ -644,26 +644,31 @@ async def regenerate_saved_submission(submission_id: str, form_id: str = Query(.
             raise HTTPException(status_code=500, detail="Failed to retrieve saved form submissions")
 
         form_saved_entries = saved_form_submissions.get(form_id, [])
-        saved_entry = next((s for s in form_saved_entries if s.get("submission_id") == submission_id), None)
+        saved_entry = next((s for s in form_saved_entries if s.get("saved_submission_id") == saved_submission_id), None)
         if not saved_entry:
             raise HTTPException(
                 status_code=404,
-                detail=f"Saved submission with ID '{submission_id}' not found for form '{form_id}'"
+                detail=f"Saved submission with ID '{saved_submission_id}' not found for form '{form_id}'"
             )
 
-        # If already regenerated and file still exists, return cached file.
+        saved_dir = os.path.abspath("saved")
+        os.makedirs(saved_dir, exist_ok=True)
+
+        # If already regenerated and cached file exists inside saved folder, return it.
         cached_file_path = saved_entry.get("regenerated_file_path")
         if cached_file_path and not os.path.isabs(cached_file_path):
             cached_file_path = os.path.abspath(cached_file_path)
 
         if saved_entry.get("is_regenerated") and cached_file_path and os.path.exists(cached_file_path):
-            cached_filename = os.path.basename(cached_file_path)
-            return FileResponse(
-                cached_file_path,
-                media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                filename=cached_filename,
-                headers=build_docx_download_headers(cached_filename)
-            )
+            is_cached_in_saved_folder = os.path.commonpath([cached_file_path, saved_dir]) == saved_dir
+            if is_cached_in_saved_folder:
+                cached_filename = os.path.basename(cached_file_path)
+                return FileResponse(
+                    cached_file_path,
+                    media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    filename=cached_filename,
+                    headers={"X-Submission-ID": saved_submission_id}
+                )
 
         values_used = saved_entry.get("values_used", {})
         if not isinstance(values_used, dict):
@@ -676,8 +681,8 @@ async def regenerate_saved_submission(submission_id: str, form_id: str = Query(.
         ).strip()
         safe_reference_text = safe_reference_text or "saved"
 
-        # Generate DOCX from saved values without re-registering in form_submissions.
-        generated_path, _ = fill_template(
+        # Regenerate and then cache the generated file in saved folder.
+        regenerated_file_path, _ = fill_template(
             form["template_path"],
             values_used,
             form_id=None,
@@ -686,27 +691,24 @@ async def regenerate_saved_submission(submission_id: str, form_id: str = Query(.
             font_size=form.get("style", {}).get("font_size")
         )
 
-        saved_dir = os.path.abspath("saved")
-        os.makedirs(saved_dir, exist_ok=True)
-        saved_filename = f"{safe_reference_text}.docx"
-        saved_file_path = os.path.join(saved_dir, saved_filename)
+        regenerated_filename = f"{safe_reference_text}.docx"
+        cached_saved_file_path = os.path.join(saved_dir, regenerated_filename)
 
-        # Move generated file into saved cache location.
-        if os.path.exists(saved_file_path):
-            os.remove(saved_file_path)
-        shutil.move(generated_path, saved_file_path)
+        if os.path.exists(cached_saved_file_path):
+            os.remove(cached_saved_file_path)
+        shutil.move(regenerated_file_path, cached_saved_file_path)
 
         # Persist regeneration state to avoid regenerating next time.
         saved_entry["is_regenerated"] = True
-        saved_entry["regenerated_file_path"] = saved_file_path
+        saved_entry["regenerated_file_path"] = cached_saved_file_path
         saved_entry["regenerated_at"] = datetime.now().isoformat()
         save_saved_form_submissions(saved_form_submissions)
 
         return FileResponse(
-            saved_file_path,
+            cached_saved_file_path,
             media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            filename=saved_filename,
-            headers=build_docx_download_headers(saved_filename)
+            filename=regenerated_filename,
+            headers={"X-Submission-ID": saved_submission_id}
         )
 
     except HTTPException:
@@ -719,14 +721,14 @@ async def regenerate_saved_submission(submission_id: str, form_id: str = Query(.
         raise HTTPException(status_code=500, detail="An unexpected error occurred while regenerating saved submission")
 
 
-@router.delete("/saved/{form_id}/{submission_id}")
-async def delete_saved_submission(form_id: str, submission_id: str):
-    """Delete a saved submission object by form_id and submission_id."""
+@router.delete("/saved/{form_id}/{saved_submission_id}")
+async def delete_saved_submission(form_id: str, saved_submission_id: str):
+    """Delete a saved submission object by form_id and saved_submission_id."""
     try:
-        logger.info(f"Deleting saved submission for form: {form_id}, submission: {submission_id}")
+        logger.info(f"Deleting saved submission for form: {form_id}, submission: {saved_submission_id}")
 
         try:
-            deleted_count = delete_saved_form_submission(form_id=form_id, submission_id=submission_id)
+            deleted_count = delete_saved_form_submission(form_id=form_id, saved_submission_id=saved_submission_id)
         except StorageError as e:
             logger.error(f"Storage error while deleting saved submission: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to delete saved submission")
@@ -734,20 +736,20 @@ async def delete_saved_submission(form_id: str, submission_id: str):
         if deleted_count == 0:
             raise HTTPException(
                 status_code=404,
-                detail=f"Saved submission not found for form '{form_id}' and submission '{submission_id}'"
+                detail=f"Saved submission not found for form '{form_id}' and saved submission '{saved_submission_id}'"
             )
 
         return {
             "message": "Saved submission deleted successfully",
             "form_id": form_id,
-            "submission_id": submission_id,
+            "saved_submission_id": saved_submission_id,
             "deleted_count": deleted_count
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error while deleting saved submission for form {form_id}, submission {submission_id}: {str(e)}")
+        logger.error(f"Unexpected error while deleting saved submission for form {form_id}, saved submission {saved_submission_id}: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred while deleting saved submission")
 
 @router.get("/submitted/{submission_id}")

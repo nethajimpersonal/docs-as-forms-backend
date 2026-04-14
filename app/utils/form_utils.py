@@ -156,8 +156,8 @@ def add_saved_form_submission(
         raise StorageError(f"Failed to add saved form submission: {str(e)}")
 
 
-def delete_saved_form_submission(form_id: str, submission_id: str) -> int:
-    """Delete saved submission records by form_id and submission_id and return delete count."""
+def delete_saved_form_submission(form_id: str, saved_submission_id: str) -> int:
+    """Delete saved submission records by form_id and saved_submission_id and return delete count."""
     try:
         saved_submissions = load_saved_form_submissions()
         form_entries = saved_submissions.get(form_id, [])
@@ -165,7 +165,7 @@ def delete_saved_form_submission(form_id: str, submission_id: str) -> int:
         if not form_entries:
             return 0
 
-        remaining_entries = [entry for entry in form_entries if entry.get("submission_id") != submission_id]
+        remaining_entries = [entry for entry in form_entries if entry.get("saved_submission_id") != saved_submission_id]
         deleted_count = len(form_entries) - len(remaining_entries)
 
         if deleted_count == 0:
@@ -181,7 +181,7 @@ def delete_saved_form_submission(form_id: str, submission_id: str) -> int:
     except StorageError:
         raise
     except Exception as e:
-        logger.error(f"Error deleting saved form submission for form {form_id}, submission {submission_id}: {str(e)}")
+        logger.error(f"Error deleting saved form submission for form {form_id}, saved_submission {saved_submission_id}: {str(e)}")
         raise StorageError(f"Failed to delete saved form submission: {str(e)}")
 
 def add_form_submission_file(form_id: str, file_path: str, values: Dict[str, str]) -> str:
@@ -498,7 +498,7 @@ def fill_template(
     form_id: str = None,
     form_name: str = None,
     font_family: str = None,
-    font_size: float = None
+    font_size: float = None,
 ) -> Tuple[str, str]:
     """
     Fill template with values, replacing placeholders in document.
